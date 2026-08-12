@@ -22,6 +22,20 @@ You can also enable the debugging output to diagnose issues:
 go run cmd/main.go fio --debug
 ```
 
+To compare a cold stacked OCI pull with the same pull after its immutable
+base has been prewarmed, provide a flat remote base image and a stacked image
+built from it:
+
+```shell
+go run cmd/main.go stacked-oci \
+  --base-image ghcr.io/example/macos-base:latest \
+  --image ghcr.io/example/macos-child:latest
+```
+
+The command uses disposable `TART_HOME` directories. Its prewarmed scenario
+keeps the VM created by `tart clone --stacked` alive while pulling the child, so
+the shared immutable base layer remains referenced and available for reuse.
+
 ## Results
 
 ### Mar 27, 2024
