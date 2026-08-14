@@ -570,8 +570,10 @@ struct Run: AsyncParsableCommand {
         }
 
         if #available(macOS 14, *) {
+          let controlSocket = try await ControlSocket(vmDir.controlSocketURL)
+
           ErrorReportingTask("Failed to run control socket") {
-            try await ControlSocket(vmDir.controlSocketURL).run()
+            try await controlSocket.run()
           }
         }
 

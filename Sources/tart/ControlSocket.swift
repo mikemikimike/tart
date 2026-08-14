@@ -6,17 +6,20 @@ import NIOPosix
 
 @available(macOS 14, *)
 class ControlSocket {
+  typealias ServerChannel = NIOAsyncChannel<NIOAsyncChannel<ByteBuffer, ByteBuffer>, Never>
+
   let controlSocketURL: URL
   let vmPort: UInt32
-  let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+  let eventLoopGroup: MultiThreadedEventLoopGroup
+  let serverChannel: ServerChannel
   let logger: os.Logger = os.Logger(subsystem: "org.cirruslabs.tart.control-socket", category: "network")
 
-  init(_ controlSocketURL: URL, vmPort: UInt32 = 8080) {
+  init(_ controlSocketURL: URL, vmPort: UInt32 = 8080) async throws {
     self.controlSocketURL = controlSocketURL
     self.vmPort = vmPort
-  }
+    let eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    self.eventLoopGroup = eventLoopGroup
 
-  func run() async throws {
     // Remove control socket file from previous "tart run" invocations,
     // if any, otherwise we may get the "address already in use" error
     try? FileManager.default.removeItem(atPath: controlSocketURL.path())
@@ -29,15 +32,22 @@ class ControlSocket {
       FileManager.default.changeCurrentDirectoryPath(baseURL.path())
     }
 
-    let serverChannel = try await ServerBootstrap(group: eventLoopGroup)
-      .bind(unixDomainSocketPath: controlSocketURL.relativePath) { childChannel in
-        childChannel.eventLoop.makeCompletedFuture {
-          return try NIOAsyncChannel<ByteBuffer, ByteBuffer>(
-            wrappingChannelSynchronously: childChannel
-          )
+    do {
+      self.serverChannel = try await ServerBootstrap(group: eventLoopGroup)
+        .bind(unixDomainSocketPath: controlSocketURL.relativePath) { childChannel in
+          childChannel.eventLoop.makeCompletedFuture {
+            return try NIOAsyncChannel<ByteBuffer, ByteBuffer>(
+              wrappingChannelSynchronously: childChannel
+            )
+          }
         }
-      }
+    } catch {
+      try? await eventLoopGroup.shutdownGracefully()
+      throw error
+    }
+  }
 
+  func run() async throws {
     try await withThrowingDiscardingTaskGroup { group in
       try await serverChannel.executeThenClose { serverInbound in
         for try await clientChannel in serverInbound {
