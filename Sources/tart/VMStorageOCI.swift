@@ -287,7 +287,12 @@ class VMStorageOCI: PrunableStorage {
         }
 
         let destination = try FileManager.default.destinationOfSymbolicLink(atPath: foundURL.path)
-        let destinationURL = URL(fileURLWithPath: destination, relativeTo: foundURL.deletingLastPathComponent())
+        let destinationURL: URL
+        if destination.hasPrefix("/") {
+          destinationURL = URL(fileURLWithPath: destination)
+        } else {
+          destinationURL = URL(fileURLWithPath: destination, relativeTo: foundURL.deletingLastPathComponent())
+        }
         if destinationURL.standardizedFileURL.path == deletedPath {
           try FileManager.default.removeItem(at: foundURL)
         }
