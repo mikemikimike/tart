@@ -795,7 +795,7 @@ final class VMStorageOCITests: XCTestCase {
       try storage.link(from: retainedTagName, to: try digestName(for: retainedManifest))
       try deletedRecord.url.updateAccessDate(Date(timeIntervalSince1970: 1))
       try retainedRecord.url.updateAccessDate(Date(timeIntervalSince1970: 2))
-      let retainedSize = UInt64(try retainedRecord.url.allocatedSizeBytes())
+      let retainedSize = UInt64(try retainedRecord.allocatedSizeBytes())
 
       try Prune.pruneSpaceBudget(prunableStorages: [storage], spaceBudgetBytes: retainedSize)
 
