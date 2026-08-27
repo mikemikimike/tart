@@ -348,8 +348,14 @@ final class VMStorageOCITests: XCTestCase {
   func testTagReplacementWaitsForPruneLock() throws {
     try withTemporaryTartHome {
       let storage = try VMStorageOCI()
-      let firstManifest = try stackedManifest(baseContentDigest: "sha256:first")
-      let secondManifest = try stackedManifest(baseContentDigest: "sha256:second")
+      let firstManifest = try stackedManifest(
+        baseContentDigest: "sha256:" + String(repeating: "1", count: 64),
+        overlayContentDigest: "sha256:" + String(repeating: "2", count: 64)
+      )
+      let secondManifest = try stackedManifest(
+        baseContentDigest: "sha256:" + String(repeating: "3", count: 64),
+        overlayContentDigest: "sha256:" + String(repeating: "4", count: 64)
+      )
       let firstName = try digestName(for: firstManifest)
       let secondName = try digestName(for: secondManifest)
       _ = try createRecord(for: firstManifest, in: storage)
