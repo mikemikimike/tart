@@ -767,7 +767,7 @@ final class VMStorageOCITests: XCTestCase {
       )
 
       XCTAssertFalse(FileManager.default.fileExists(atPath: deletedRecord.url.path))
-      XCTAssertThrowsError(try FileManager.default.destinationOfSymbolicLink(atPath: tagURL.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: tagURL.path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: retainedRecord.url.path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: retainedTagURL.path))
     }
@@ -800,7 +800,7 @@ final class VMStorageOCITests: XCTestCase {
       try Prune.pruneSpaceBudget(prunableStorages: [storage], spaceBudgetBytes: retainedSize)
 
       XCTAssertFalse(FileManager.default.fileExists(atPath: deletedRecord.url.path))
-      XCTAssertThrowsError(try FileManager.default.destinationOfSymbolicLink(atPath: tagURL.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: tagURL.path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: retainedRecord.url.path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: retainedTagURL.path))
     }
