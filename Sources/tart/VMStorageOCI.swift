@@ -294,7 +294,7 @@ class VMStorageOCI: PrunableStorage {
       return
     }
 
-    let standardizedTargetPath = targetURL.standardizedFileURL.path
+    let standardizedTargetPath = targetURL.absoluteURL.standardizedFileURL.path
     for case let foundURL as URL in enumerator {
       guard try foundURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true else {
         continue
