@@ -294,7 +294,15 @@ class VMStorageOCI: PrunableStorage {
       return
     }
 
-    let standardizedTargetPath = targetURL.absoluteURL.standardizedFileURL.path
+    let normalizedPath: (URL) -> String = { url in
+      var path = url.absoluteURL.standardizedFileURL.path
+      while path.count > 1 && path.hasSuffix("/") {
+        path.removeLast()
+      }
+      return path
+    }
+
+    let standardizedTargetPath = normalizedPath(targetURL)
     for case let foundURL as URL in enumerator {
       guard try foundURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true else {
         continue
@@ -304,8 +312,8 @@ class VMStorageOCI: PrunableStorage {
       let destinationURL = URL(
         fileURLWithPath: destination,
         relativeTo: foundURL.deletingLastPathComponent()
-      ).standardizedFileURL
-      if destinationURL.path == standardizedTargetPath {
+      )
+      if normalizedPath(destinationURL) == standardizedTargetPath {
         try FileManager.default.removeItem(at: foundURL)
       }
     }
