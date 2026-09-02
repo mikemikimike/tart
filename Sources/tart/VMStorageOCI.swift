@@ -312,7 +312,7 @@ class VMStorageOCI: PrunableStorage {
       let destinationURL = URL(
         fileURLWithPath: destination,
         relativeTo: foundURL.deletingLastPathComponent()
-      )
+      ).absoluteURL.standardizedFileURL
       if normalizedPath(destinationURL) == standardizedTargetPath {
         try FileManager.default.removeItem(at: foundURL)
       }
