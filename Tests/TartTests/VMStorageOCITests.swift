@@ -761,6 +761,11 @@ final class VMStorageOCITests: XCTestCase {
       try storage.link(from: retainedTagName, to: try digestName(for: retainedManifest))
       try deletedRecord.url.updateAccessDate(Date(timeIntervalSince1970: 1))
 
+      let prunableURL = try storage.prunables().first { $0.url.lastPathComponent == deletedRecord.url.lastPathComponent }!.url
+      let destination = try FileManager.default.destinationOfSymbolicLink(atPath: tagURL.path)
+      let destinationURL = URL(fileURLWithPath: destination, relativeTo: tagURL.deletingLastPathComponent())
+      print("PRUNE DEBUG base=\(storage.baseURL.absoluteString) record=\(deletedRecord.url.absoluteString) candidate=\(prunableURL.absoluteString) targetPath=\(prunableURL.absoluteURL.standardizedFileURL.path) destination=\(destination) destinationURL=\(destinationURL.absoluteString) destinationPath=\(destinationURL.absoluteURL.standardizedFileURL.path) destinationBase=\(destinationURL.baseURL?.absoluteString ?? \"nil\")")
+
       try Prune.pruneOlderThan(
         prunableStorages: [storage],
         olderThanDate: Date(timeIntervalSince1970: 2)
