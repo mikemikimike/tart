@@ -323,11 +323,10 @@ class VMStorageOCI: PrunableStorage {
   fileprivate func removeTagSymlinks(at urls: [URL], pointingTo targetURL: URL) throws {
     let standardizedTargetPath = normalizedPath(targetURL)
     for foundURL in urls {
-      guard try foundURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true else {
+      guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: foundURL.path) else {
         continue
       }
 
-      let destination = try FileManager.default.destinationOfSymbolicLink(atPath: foundURL.path)
       let destinationURL = URL(
         fileURLWithPath: destination,
         relativeTo: foundURL.deletingLastPathComponent()
