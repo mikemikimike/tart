@@ -291,15 +291,19 @@ class VMStorageOCI: PrunableStorage {
     return path
   }
 
+  private func canonicalPath(_ url: URL) -> String {
+    normalizedPath(url.resolvingSymlinksInPath())
+  }
+
   /// Find tag links that point at a cached image before its directory is removed.
   fileprivate func tagSymlinks(pointingTo targetURL: URL) throws -> [URL] {
-    let standardizedTargetPath = normalizedPath(targetURL)
+    let canonicalTargetPath = canonicalPath(targetURL)
     return try list().compactMap { (_, vmDir, isSymlink) in
       guard isSymlink else {
         return nil
       }
 
-      guard normalizedPath(vmDir.baseURL.resolvingSymlinksInPath()) == standardizedTargetPath else {
+      guard canonicalPath(vmDir.baseURL) == canonicalTargetPath else {
         return nil
       }
 
@@ -309,7 +313,7 @@ class VMStorageOCI: PrunableStorage {
 
   /// Remove only the links previously identified for a deleted cached image.
   fileprivate func removeTagSymlinks(at urls: [URL], pointingTo targetURL: URL) throws {
-    let standardizedTargetPath = normalizedPath(targetURL)
+    let canonicalTargetPath = canonicalPath(targetURL)
     for foundURL in urls {
       guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: foundURL.path) else {
         continue
@@ -319,7 +323,7 @@ class VMStorageOCI: PrunableStorage {
         fileURLWithPath: destination,
         relativeTo: foundURL.deletingLastPathComponent()
       ).absoluteURL.standardizedFileURL
-      if normalizedPath(destinationURL) == standardizedTargetPath {
+      if canonicalPath(destinationURL) == canonicalTargetPath {
         try FileManager.default.removeItem(at: foundURL)
       }
     }
