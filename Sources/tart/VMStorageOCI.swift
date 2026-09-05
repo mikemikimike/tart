@@ -293,30 +293,18 @@ class VMStorageOCI: PrunableStorage {
 
   /// Find tag links that point at a cached image before its directory is removed.
   fileprivate func tagSymlinks(pointingTo targetURL: URL) throws -> [URL] {
-    guard let enumerator = FileManager.default.enumerator(
-      at: baseURL,
-      includingPropertiesForKeys: [.isSymbolicLinkKey]
-    ) else {
-      return []
-    }
-
     let standardizedTargetPath = normalizedPath(targetURL)
-    var result = [URL]()
-    for case let foundURL as URL in enumerator {
-      guard try foundURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true else {
-        continue
+    return try list().compactMap { (_, vmDir, isSymlink) in
+      guard isSymlink else {
+        return nil
       }
 
-      let destination = try FileManager.default.destinationOfSymbolicLink(atPath: foundURL.path)
-      let destinationURL = URL(
-        fileURLWithPath: destination,
-        relativeTo: foundURL.deletingLastPathComponent()
-      ).absoluteURL.standardizedFileURL
-      if normalizedPath(destinationURL) == standardizedTargetPath {
-        result.append(foundURL)
+      guard normalizedPath(vmDir.baseURL.resolvingSymlinksInPath()) == standardizedTargetPath else {
+        return nil
       }
+
+      return vmDir.baseURL
     }
-    return result
   }
 
   /// Remove only the links previously identified for a deleted cached image.
