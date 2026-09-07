@@ -307,7 +307,7 @@ class VMStorageOCI: PrunableStorage {
         return nil
       }
 
-      return vmDir.baseURL
+      return URL(fileURLWithPath: vmDir.baseURL.path, relativeTo: baseURL).standardizedFileURL
     }
   }
 
