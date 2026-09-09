@@ -75,12 +75,18 @@ struct Prune: AsyncParsableCommand {
   }
 
   static func pruneOlderThan(prunableStorages: [PrunableStorage], olderThanDate: Date) throws {
-    while let prunable = try prunableStorages
-      .flatMap({ try $0.prunables() })
-      .first(where: { try $0.accessDate() <= olderThanDate }) {
-      // Deletion may remove derived prunables (for example shared content),
-      // so never continue from a stale snapshot.
-      try prunable.delete()
+    let prunables = try prunableStorages.flatMap { try $0.prunables() }
+
+    for prunable in prunables {
+      // Deleting a cached image may also collect its now-unreferenced content,
+      // so tolerate derived entries that disappeared from the snapshot.
+      guard FileManager.default.fileExists(atPath: prunable.url.path) else {
+        continue
+      }
+
+      if try prunable.accessDate() <= olderThanDate {
+        try prunable.delete()
+      }
     }
   }
 

@@ -283,8 +283,16 @@ class VMStorageOCI: PrunableStorage {
     }
   }
 
+  private func absoluteURL(_ url: URL) -> URL {
+    guard !url.path.hasPrefix("/") else {
+      return url
+    }
+
+    return URL(fileURLWithPath: url.path, relativeTo: baseURL).absoluteURL
+  }
+
   private func normalizedPath(_ url: URL) -> String {
-    var path = url.absoluteURL.standardizedFileURL.path
+    var path = absoluteURL(url).standardizedFileURL.path
     while path.count > 1 && path.hasSuffix("/") {
       path.removeLast()
     }
@@ -292,7 +300,7 @@ class VMStorageOCI: PrunableStorage {
   }
 
   private func canonicalPath(_ url: URL) -> String {
-    normalizedPath(url.resolvingSymlinksInPath())
+    normalizedPath(absoluteURL(url).resolvingSymlinksInPath())
   }
 
   /// Find tag links that point at a cached image before its directory is removed.
@@ -307,7 +315,7 @@ class VMStorageOCI: PrunableStorage {
         return nil
       }
 
-      return URL(fileURLWithPath: vmDir.baseURL.path, relativeTo: baseURL).standardizedFileURL
+      return absoluteURL(vmDir.baseURL).standardizedFileURL
     }
   }
 
