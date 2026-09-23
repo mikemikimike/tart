@@ -273,12 +273,67 @@ class VMStorageOCI: PrunableStorage {
 
   /// Remove immutable files whose final published or in-progress reference
   /// has disappeared, without collecting unrelated cached images.
-  fileprivate func gcContent() throws {
+  func gcContent() throws {
     let contentStore = try ContentStore()
     try contentStore.withPruneLock {
       let referencedContentDigests = try referencedContentDigests(includeCachedImages: true)
       for contentURL in try contentStore.prunables(excluding: referencedContentDigests) {
         try FileManager.default.removeItem(at: contentURL)
+      }
+    }
+  }
+
+  private func absoluteURL(_ url: URL) -> URL {
+    if url.path.hasPrefix("/") {
+      return URL(fileURLWithPath: url.path)
+    }
+
+    return URL(fileURLWithPath: url.path, relativeTo: baseURL).absoluteURL
+  }
+
+  private func normalizedPath(_ url: URL) -> String {
+    var path = absoluteURL(url).standardizedFileURL.path
+    while path.count > 1 && path.hasSuffix("/") {
+      path.removeLast()
+    }
+    return path
+  }
+
+  private func canonicalPath(_ url: URL) -> String {
+    let absoluteURL = URL(fileURLWithPath: self.absoluteURL(url).path)
+    return normalizedPath(absoluteURL.resolvingSymlinksInPath())
+  }
+
+  /// Find tag links that point at a cached image before its directory is removed.
+  fileprivate func tagSymlinks(pointingTo targetURL: URL) throws -> [URL] {
+    let canonicalTargetPath = canonicalPath(targetURL)
+    return try list().compactMap { (_, vmDir, isSymlink) in
+      guard isSymlink else {
+        return nil
+      }
+
+      guard canonicalPath(vmDir.baseURL) == canonicalTargetPath else {
+        return nil
+      }
+
+      return absoluteURL(vmDir.baseURL).standardizedFileURL
+    }
+  }
+
+  /// Remove only the links previously identified for a deleted cached image.
+  fileprivate func removeTagSymlinks(at urls: [URL], pointingTo targetURL: URL) throws {
+    let canonicalTargetPath = canonicalPath(targetURL)
+    for foundURL in urls {
+      guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: foundURL.path) else {
+        continue
+      }
+
+      let destinationURL = URL(
+        fileURLWithPath: destination,
+        relativeTo: foundURL.deletingLastPathComponent()
+      ).absoluteURL.standardizedFileURL
+      if canonicalPath(destinationURL) == canonicalTargetPath {
+        try FileManager.default.removeItem(at: foundURL)
       }
     }
   }
@@ -829,10 +884,21 @@ private struct CachedImagePrunable: Prunable {
   }
 
   func delete() throws {
-    try vmDir.delete()
-    // Deleting a record can make attributed content unreferenced. Run GC now
-    // so one prune invocation reclaims those bytes.
-    try VMStorageOCI().gcContent()
+    try delete(deferPostDeletionCleanup: false)
+  }
+
+  func delete(deferPostDeletionCleanup: Bool) throws {
+    let storage = try VMStorageOCI()
+    let contentStore = try ContentStore()
+    try contentStore.withPruneLock {
+      let tagSymlinks = try storage.tagSymlinks(pointingTo: vmDir.url)
+      try vmDir.deleteHoldingPruneLock()
+      try storage.removeTagSymlinks(at: tagSymlinks, pointingTo: vmDir.url)
+    }
+
+    if !deferPostDeletionCleanup {
+      try storage.gcContent()
+    }
   }
 
   func accessDate() throws -> Date {

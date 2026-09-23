@@ -75,9 +75,21 @@ struct Prune: AsyncParsableCommand {
   }
 
   static func pruneOlderThan(prunableStorages: [PrunableStorage], olderThanDate: Date) throws {
-    let prunables: [Prunable] = try prunableStorages.flatMap { try $0.prunables() }
+    let prunables = try prunableStorages.flatMap { try $0.prunables() }
 
-    try prunables.filter { try $0.accessDate() <= olderThanDate }.forEach { try $0.delete() }
+    for prunable in prunables {
+      // Deleting a cached image may also collect its now-unreferenced content,
+      // so tolerate derived entries that disappeared from the snapshot.
+      guard FileManager.default.fileExists(atPath: prunable.url.path) else {
+        continue
+      }
+
+      if try prunable.accessDate() <= olderThanDate {
+        try prunable.delete(deferPostDeletionCleanup: true)
+      }
+    }
+
+    try collectOCIContentIfNeeded(in: prunableStorages)
   }
 
   static func pruneSpaceBudget(prunableStorages: [PrunableStorage], spaceBudgetBytes: UInt64) throws {
@@ -102,13 +114,26 @@ struct Prune: AsyncParsableCommand {
       }
 
       guard let prunableToDelete else {
-        return
+        break
       }
 
       // Deleting one cached stacked image can change which remaining image
       // owns shared immutable content. Rebuild before choosing another.
-      try prunableToDelete.delete()
+      try prunableToDelete.delete(deferPostDeletionCleanup: true)
     }
+
+    try collectOCIContentIfNeeded(in: prunableStorages)
+  }
+
+  private static func collectOCIContentIfNeeded(in prunableStorages: [PrunableStorage]) throws {
+    guard prunableStorages.contains(where: { $0 is VMStorageOCI }) else {
+      return
+    }
+
+    // Cached-image deletion removes only its tag links and record. Defer the
+    // content-store scan until the prune batch is complete so age pruning does
+    // not rescan every OCI manifest after each candidate.
+    try VMStorageOCI().gcContent()
   }
 
   static func reclaimIfNeeded(_ requiredBytes: UInt64, _ initiator: Prunable? = nil) throws {
