@@ -284,13 +284,12 @@ class VMStorageOCI: PrunableStorage {
   }
 
   private func absoluteURL(_ url: URL) -> URL {
-    if url.path.hasPrefix("/") {
+    if url.baseURL == nil && url.path.hasPrefix("/") {
       return URL(fileURLWithPath: url.path)
     }
 
-    return URL(fileURLWithPath: url.path, relativeTo: baseURL).absoluteURL
+    return URL(fileURLWithPath: url.relativeString, relativeTo: baseURL).standardizedFileURL
   }
-
   private func normalizedPath(_ url: URL) -> String {
     var path = absoluteURL(url).standardizedFileURL.path
     while path.count > 1 && path.hasSuffix("/") {
@@ -331,7 +330,7 @@ class VMStorageOCI: PrunableStorage {
       let destinationURL = URL(
         fileURLWithPath: destination,
         relativeTo: foundURL.deletingLastPathComponent()
-      ).absoluteURL.standardizedFileURL
+      ).standardizedFileURL
       if canonicalPath(destinationURL) == canonicalTargetPath {
         try FileManager.default.removeItem(at: foundURL)
       }
@@ -346,30 +345,27 @@ class VMStorageOCI: PrunableStorage {
       return []
     }
 
-    for case let foundURL as URL in enumerator {
+    for case let relativeURL as URL in enumerator {
+      let foundPath = URL(fileURLWithPath: relativeURL.relativePath, relativeTo: baseURL).standardizedFileURL.path
+      // standardizing an existing directory infers its directory hint again.
+      let foundURL = URL(fileURLWithPath: foundPath, isDirectory: false)
       let vmDir = VMDirectory(baseURL: foundURL)
 
       if !vmDir.isCachedImage {
         continue
       }
 
-      // Split the relative VM's path at the last component
-      // and figure out which character should be used
-      // to join them together, either ":" for tags or
-      // "@" for hashes
-      let parts = [foundURL.deletingLastPathComponent().relativePath, foundURL.lastPathComponent]
-      var name: String
-
-      let isSymlink = try foundURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink!
-      if isSymlink {
-        name = parts.joined(separator: ":")
-      } else {
-        name = parts.joined(separator: "@")
+      let relativePath = relativeURL.relativePath
+      guard let separatorIndex = relativePath.lastIndex(of: "/") else {
+        continue
       }
-
-      // Remove the percent-encoding, if any
-      name = percentDecode(name)
-
+      let parts = [
+        String(relativePath[..<separatorIndex]),
+        String(relativePath[relativePath.index(after: separatorIndex)...])
+      ]
+      let isSymlink = try foundURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink!
+      let separator = isSymlink ? ":" : "@"
+      let name = percentDecode(parts.joined(separator: separator))
       result.append((name, vmDir, isSymlink))
     }
 

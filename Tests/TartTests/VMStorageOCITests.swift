@@ -73,7 +73,10 @@ final class VMStorageOCITests: XCTestCase {
 
   func testListIncludesStackedCachedImage() throws {
     try withTemporaryTartHome {
-      let manifest = try stackedManifest()
+      let manifest = try stackedManifest(
+        baseContentDigest: "sha256:" + String(repeating: "a", count: 64),
+        overlayContentDigest: "sha256:" + String(repeating: "b", count: 64)
+      )
       let name = try digestName(for: manifest)
       let storage = try VMStorageOCI()
       let record = try storage.create(name)
@@ -84,6 +87,35 @@ final class VMStorageOCITests: XCTestCase {
       XCTAssertTrue(try storage.list().contains { $0.0 == name.description })
       XCTAssertEqual(try record.diskSizeBytes(), 4096)
       XCTAssertNoThrow(try record.allocatedSizeBytes())
+    }
+  }
+
+  func testListIncludesCachedImageWithPortInHost() throws {
+    try withTemporaryTartHome {
+      let manifest = try stackedManifest(
+        baseContentDigest: "sha256:" + String(repeating: "c", count: 64),
+        overlayContentDigest: "sha256:" + String(repeating: "d", count: 64)
+      )
+      let digestName = try digestName(for: manifest)
+      let name = RemoteName(
+        host: "registry.example.com:5000",
+        namespace: digestName.namespace,
+        reference: digestName.reference
+      )
+      let storage = try VMStorageOCI()
+      let record = try storage.create(name)
+      try config().save(toURL: record.configURL)
+      XCTAssertTrue(FileManager.default.createFile(atPath: record.nvramURL.path, contents: Data()))
+      try manifest.toJSON().write(to: record.manifestURL)
+      let tagName = RemoteName(host: name.host, namespace: name.namespace, reference: Reference(tag: "latest"))
+      try storage.link(from: tagName, to: name)
+
+      let listed = try XCTUnwrap(storage.list().first { $0.0 == name.description })
+      XCTAssertEqual(listed.1.url.standardizedFileURL, record.url.standardizedFileURL)
+      XCTAssertFalse(listed.2)
+      let listedTag = try XCTUnwrap(storage.list().first { $0.0 == tagName.description })
+      XCTAssertTrue(listedTag.2)
+      XCTAssertTrue(try storage.prunables().contains { $0.url.standardizedFileURL == record.url.standardizedFileURL })
     }
   }
 
@@ -850,7 +882,8 @@ final class VMStorageOCITests: XCTestCase {
         reference: Reference(tag: "latest")
       )
       try storage.link(from: tagName, to: name)
-      let prunable = try XCTUnwrap(storage.prunables().first { $0.url == record.url })
+      let prunables = try storage.prunables()
+      let prunable = try XCTUnwrap(prunables.first { $0.url == record.url })
 
       let contentStore = try ContentStore()
       let lockHeld = DispatchSemaphore(value: 0)
