@@ -273,7 +273,7 @@ class VMStorageOCI: PrunableStorage {
 
   /// Remove immutable files whose final published or in-progress reference
   /// has disappeared, without collecting unrelated cached images.
-  func gcContent() throws {
+  fileprivate func gcContent() throws {
     let contentStore = try ContentStore()
     try contentStore.withPruneLock {
       let referencedContentDigests = try referencedContentDigests(includeCachedImages: true)
@@ -283,58 +283,34 @@ class VMStorageOCI: PrunableStorage {
     }
   }
 
-  private func absoluteURL(_ url: URL) -> URL {
-    if url.baseURL == nil && url.path.hasPrefix("/") {
-      return URL(fileURLWithPath: url.path)
-    }
-
-    return URL(fileURLWithPath: url.relativeString, relativeTo: baseURL).standardizedFileURL
-  }
-  private func normalizedPath(_ url: URL) -> String {
-    var path = absoluteURL(url).standardizedFileURL.path
-    while path.count > 1 && path.hasSuffix("/") {
-      path.removeLast()
-    }
-    return path
+  private func resolvedPath(_ url: URL) -> String {
+    url.standardizedFileURL.resolvingSymlinksInPath().standardizedFileURL.path
   }
 
-  private func canonicalPath(_ url: URL) -> String {
-    let absoluteURL = URL(fileURLWithPath: self.absoluteURL(url).path)
-    return normalizedPath(absoluteURL.resolvingSymlinksInPath())
-  }
-
-  /// Find tag links that point at a cached image before its directory is removed.
+  /// Find tag links to a cached image before its directory is removed.
   fileprivate func tagSymlinks(pointingTo targetURL: URL) throws -> [URL] {
-    let canonicalTargetPath = canonicalPath(targetURL)
-    return try list().compactMap { (_, vmDir, isSymlink) in
-      guard isSymlink else {
-        return nil
-      }
-
-      guard canonicalPath(vmDir.baseURL) == canonicalTargetPath else {
-        return nil
-      }
-
-      return absoluteURL(vmDir.baseURL).standardizedFileURL
+    let targetPath = resolvedPath(targetURL)
+    guard let enumerator = FileManager.default.enumerator(
+      at: baseURL,
+      includingPropertiesForKeys: [.isSymbolicLinkKey]
+    ) else {
+      return []
     }
-  }
 
-  /// Remove only the links previously identified for a deleted cached image.
-  fileprivate func removeTagSymlinks(at urls: [URL], pointingTo targetURL: URL) throws {
-    let canonicalTargetPath = canonicalPath(targetURL)
-    for foundURL in urls {
-      guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: foundURL.path) else {
+    var result: [URL] = []
+    for case let url as URL in enumerator {
+      guard try url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true else {
         continue
       }
 
-      let destinationURL = URL(
-        fileURLWithPath: destination,
-        relativeTo: foundURL.deletingLastPathComponent()
-      ).standardizedFileURL
-      if canonicalPath(destinationURL) == canonicalTargetPath {
-        try FileManager.default.removeItem(at: foundURL)
+      let destination = try FileManager.default.destinationOfSymbolicLink(atPath: url.path)
+      let destinationURL = URL(fileURLWithPath: destination, relativeTo: url.deletingLastPathComponent())
+      if resolvedPath(destinationURL) == targetPath {
+        result.append(url)
       }
     }
+
+    return result
   }
 
   func list() throws -> [(String, VMDirectory, Bool)] {
@@ -880,21 +856,15 @@ private struct CachedImagePrunable: Prunable {
   }
 
   func delete() throws {
-    try delete(deferPostDeletionCleanup: false)
-  }
-
-  func delete(deferPostDeletionCleanup: Bool) throws {
     let storage = try VMStorageOCI()
     let contentStore = try ContentStore()
     try contentStore.withPruneLock {
       let tagSymlinks = try storage.tagSymlinks(pointingTo: vmDir.url)
       try vmDir.deleteHoldingPruneLock()
-      try storage.removeTagSymlinks(at: tagSymlinks, pointingTo: vmDir.url)
+      try tagSymlinks.forEach { try FileManager.default.removeItem(at: $0) }
     }
 
-    if !deferPostDeletionCleanup {
-      try storage.gcContent()
-    }
+    try storage.gcContent()
   }
 
   func accessDate() throws -> Date {

@@ -838,6 +838,27 @@ final class VMStorageOCITests: XCTestCase {
     }
   }
 
+  func testGCRunBeforeSpaceBudgetPruningDoesNotLeaveBrokenTagSymlink() throws {
+    try withTemporaryTartHome {
+      let storage = try VMStorageOCI()
+      let manifest = try stackedManifest(
+        baseContentDigest: "sha256:" + String(repeating: "a", count: 64),
+        overlayContentDigest: "sha256:" + String(repeating: "b", count: 64)
+      )
+      let name = try digestName(for: manifest)
+      let record = try createRecord(for: manifest, in: storage)
+      let tagName = RemoteName(host: name.host, namespace: name.namespace, reference: Reference(tag: "latest"))
+      let tagURL = storage.baseURL.appendingRemoteName(tagName)
+      try storage.link(from: tagName, to: name)
+
+      try storage.gc()
+      try Prune.pruneSpaceBudget(prunableStorages: [storage], spaceBudgetBytes: 0)
+
+      XCTAssertFalse(FileManager.default.fileExists(atPath: record.url.path))
+      XCTAssertFalse((try? tagURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false)
+    }
+  }
+
   func testAgePruningDeletesMultipleOldCachedImagesWithoutStaleCandidates() throws {
     try withTemporaryTartHome {
       let storage = try VMStorageOCI()
@@ -864,6 +885,30 @@ final class VMStorageOCITests: XCTestCase {
       for record in oldRecords {
         XCTAssertFalse(FileManager.default.fileExists(atPath: record.url.path))
       }
+    }
+  }
+
+  func testAgePruningKeepsNewerUntaggedCachedImage() throws {
+    try withTemporaryTartHome {
+      let storage = try VMStorageOCI()
+      let old = try createRecord(for: stackedManifest(
+        baseContentDigest: "sha256:" + String(repeating: "a", count: 64),
+        overlayContentDigest: "sha256:" + String(repeating: "c", count: 64)
+      ), in: storage)
+      let newer = try createRecord(for: stackedManifest(
+        baseContentDigest: "sha256:" + String(repeating: "b", count: 64),
+        overlayContentDigest: "sha256:" + String(repeating: "d", count: 64)
+      ), in: storage)
+      try old.url.updateAccessDate(Date(timeIntervalSince1970: 1))
+      try newer.url.updateAccessDate(Date(timeIntervalSince1970: 3))
+
+      try Prune.pruneOlderThan(
+        prunableStorages: [storage],
+        olderThanDate: Date(timeIntervalSince1970: 2)
+      )
+
+      XCTAssertFalse(FileManager.default.fileExists(atPath: old.url.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: newer.url.path))
     }
   }
 
