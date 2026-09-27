@@ -105,6 +105,8 @@ struct Prune: AsyncParsableCommand {
         return
       }
 
+      // Deleting one cached stacked image can change which remaining image
+      // owns shared immutable content. Rebuild before choosing another.
       try prunableToDelete.delete()
     }
   }
