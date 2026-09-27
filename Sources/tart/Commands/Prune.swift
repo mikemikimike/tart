@@ -102,7 +102,7 @@ struct Prune: AsyncParsableCommand {
       }
 
       guard let prunableToDelete else {
-        break
+        return
       }
 
       try prunableToDelete.delete()

@@ -290,27 +290,30 @@ class VMStorageOCI: PrunableStorage {
   /// Find tag links to a cached image before its directory is removed.
   fileprivate func tagSymlinks(pointingTo targetURL: URL) throws -> [URL] {
     let targetPath = resolvedPath(targetURL)
-    guard let enumerator = FileManager.default.enumerator(
-      at: baseURL,
-      includingPropertiesForKeys: [.isSymbolicLinkKey]
-    ) else {
-      return []
-    }
+    return try list().compactMap { (_, vmDir, isSymlink) in
+      guard isSymlink, resolvedPath(vmDir.baseURL) == targetPath else {
+        return nil
+      }
 
-    var result: [URL] = []
-    for case let url as URL in enumerator {
-      guard try url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true else {
+      return vmDir.baseURL
+    }
+  }
+
+  /// Remove only links that still point at the deleted cached image.
+  fileprivate func removeTagSymlinks(at urls: [URL], pointingTo targetURL: URL) throws {
+    let targetPath = resolvedPath(targetURL)
+    for url in urls {
+      guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: url.path) else {
         continue
       }
 
-      let destination = try FileManager.default.destinationOfSymbolicLink(atPath: url.path)
       let destinationURL = URL(fileURLWithPath: destination, relativeTo: url.deletingLastPathComponent())
-      if resolvedPath(destinationURL) == targetPath {
-        result.append(url)
+      guard resolvedPath(destinationURL) == targetPath else {
+        continue
       }
-    }
 
-    return result
+      try FileManager.default.removeItem(at: url)
+    }
   }
 
   func list() throws -> [(String, VMDirectory, Bool)] {
@@ -861,7 +864,7 @@ private struct CachedImagePrunable: Prunable {
     try contentStore.withPruneLock {
       let tagSymlinks = try storage.tagSymlinks(pointingTo: vmDir.url)
       try vmDir.deleteHoldingPruneLock()
-      try tagSymlinks.forEach { try FileManager.default.removeItem(at: $0) }
+      try storage.removeTagSymlinks(at: tagSymlinks, pointingTo: vmDir.url)
     }
 
     try storage.gcContent()
