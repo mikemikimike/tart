@@ -273,7 +273,7 @@ class VMStorageOCI: PrunableStorage {
 
   /// Remove immutable files whose final published or in-progress reference
   /// has disappeared, without collecting unrelated cached images.
-  fileprivate func gcContent() throws {
+  func gcContent() throws {
     let contentStore = try ContentStore()
     try contentStore.withPruneLock {
       let referencedContentDigests = try referencedContentDigests(includeCachedImages: true)
@@ -296,23 +296,6 @@ class VMStorageOCI: PrunableStorage {
       }
 
       return vmDir.baseURL
-    }
-  }
-
-  /// Remove only links that still point at the deleted cached image.
-  fileprivate func removeTagSymlinks(at urls: [URL], pointingTo targetURL: URL) throws {
-    let targetPath = resolvedPath(targetURL)
-    for url in urls {
-      guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: url.path) else {
-        continue
-      }
-
-      let destinationURL = URL(fileURLWithPath: destination, relativeTo: url.deletingLastPathComponent())
-      guard resolvedPath(destinationURL) == targetPath else {
-        continue
-      }
-
-      try FileManager.default.removeItem(at: url)
     }
   }
 
@@ -864,10 +847,8 @@ private struct CachedImagePrunable: Prunable {
     try contentStore.withPruneLock {
       let tagSymlinks = try storage.tagSymlinks(pointingTo: vmDir.url)
       try vmDir.deleteHoldingPruneLock()
-      try storage.removeTagSymlinks(at: tagSymlinks, pointingTo: vmDir.url)
+      try tagSymlinks.forEach { try FileManager.default.removeItem(at: $0) }
     }
-
-    try storage.gcContent()
   }
 
   func accessDate() throws -> Date {

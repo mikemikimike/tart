@@ -575,6 +575,21 @@ final class VMStorageOCITests: XCTestCase {
     }
   }
 
+  func testAgePruningWithoutDeletingImageKeepsUnreferencedContent() throws {
+    try withTemporaryTartHome {
+      let contentStore = try ContentStore()
+      let content = try installContent(Data("unreferenced-content".utf8), into: contentStore)
+      let storage = try VMStorageOCI()
+
+      try Prune.pruneOlderThan(
+        prunableStorages: [storage],
+        olderThanDate: .distantPast
+      )
+
+      XCTAssertTrue(FileManager.default.fileExists(atPath: content.url.path))
+    }
+  }
+
   func testPruningOneStackedOCIRecordPreservesSharedContent() throws {
     try withTemporaryTartHome {
       let contentStore = try ContentStore()
@@ -597,20 +612,22 @@ final class VMStorageOCITests: XCTestCase {
       )
       let firstRecord = try createRecord(for: firstManifest, in: storage)
       let secondRecord = try createRecord(for: secondManifest, in: storage)
+      try firstRecord.url.updateAccessDate(Date(timeIntervalSince1970: 1))
+      try secondRecord.url.updateAccessDate(Date(timeIntervalSince1970: 3))
 
-      let firstCandidate = try XCTUnwrap(storage.prunables().first {
-        $0.url.lastPathComponent == firstRecord.url.lastPathComponent
-      })
-      try firstCandidate.delete()
+      try Prune.pruneOlderThan(
+        prunableStorages: [storage],
+        olderThanDate: Date(timeIntervalSince1970: 2)
+      )
 
       XCTAssertTrue(FileManager.default.fileExists(atPath: baseContent.url.path))
       XCTAssertFalse(FileManager.default.fileExists(atPath: firstOverlay.url.path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: secondOverlay.url.path))
 
-      let secondCandidate = try XCTUnwrap(storage.prunables().first {
-        $0.url.lastPathComponent == secondRecord.url.lastPathComponent
-      })
-      try secondCandidate.delete()
+      try Prune.pruneOlderThan(
+        prunableStorages: [storage],
+        olderThanDate: Date(timeIntervalSince1970: 4)
+      )
 
       XCTAssertFalse(FileManager.default.fileExists(atPath: baseContent.url.path))
       XCTAssertFalse(FileManager.default.fileExists(atPath: secondOverlay.url.path))
@@ -928,7 +945,9 @@ final class VMStorageOCITests: XCTestCase {
       )
       try storage.link(from: tagName, to: name)
       let prunables = try storage.prunables()
-      let prunable = try XCTUnwrap(prunables.first { $0.url == record.url })
+      let prunable = try XCTUnwrap(prunables.first {
+        $0.url.standardizedFileURL.path == record.url.standardizedFileURL.path
+      })
 
       let contentStore = try ContentStore()
       let lockHeld = DispatchSemaphore(value: 0)
