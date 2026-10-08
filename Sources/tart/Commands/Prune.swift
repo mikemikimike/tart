@@ -137,9 +137,8 @@ struct Prune: AsyncParsableCommand {
   }
 
   private static func isCachedImage(_ prunable: Prunable, in storage: VMStorageOCI) -> Bool {
-    prunable.url.standardizedFileURL.pathComponents.starts(
-      with: storage.baseURL.standardizedFileURL.pathComponents
-    )
+    prunable.url.standardizedFileURL.pathComponents.starts(with: storage.baseURL.standardizedFileURL.pathComponents) &&
+      VMDirectory(baseURL: prunable.url).isCachedImage
   }
 
   private static func collectOCIContentIfNeeded(

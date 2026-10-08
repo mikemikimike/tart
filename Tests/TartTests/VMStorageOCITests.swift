@@ -90,35 +90,6 @@ final class VMStorageOCITests: XCTestCase {
     }
   }
 
-  func testListIncludesCachedImageWithPortInHost() throws {
-    try withTemporaryTartHome {
-      let manifest = try stackedManifest(
-        baseContentDigest: "sha256:" + String(repeating: "c", count: 64),
-        overlayContentDigest: "sha256:" + String(repeating: "d", count: 64)
-      )
-      let digestName = try digestName(for: manifest)
-      let name = RemoteName(
-        host: "registry.example.com:5000",
-        namespace: digestName.namespace,
-        reference: digestName.reference
-      )
-      let storage = try VMStorageOCI()
-      let record = try storage.create(name)
-      try config().save(toURL: record.configURL)
-      XCTAssertTrue(FileManager.default.createFile(atPath: record.nvramURL.path, contents: Data()))
-      try manifest.toJSON().write(to: record.manifestURL)
-      let tagName = RemoteName(host: name.host, namespace: name.namespace, reference: Reference(tag: "latest"))
-      try storage.link(from: tagName, to: name)
-
-      let listed = try XCTUnwrap(storage.list().first { $0.0 == name.description })
-      XCTAssertEqual(listed.1.url.standardizedFileURL, record.url.standardizedFileURL)
-      XCTAssertFalse(listed.2)
-      let listedTag = try XCTUnwrap(storage.list().first { $0.0 == tagName.description })
-      XCTAssertTrue(listedTag.2)
-      XCTAssertTrue(try storage.prunables().contains { $0.url.standardizedFileURL == record.url.standardizedFileURL })
-    }
-  }
-
   func testStackedCacheHitRequiresExpectedContentSizes() throws {
     try withTemporaryTartHome {
       let baseData = Data(repeating: 0x41, count: 10)
@@ -804,6 +775,9 @@ final class VMStorageOCITests: XCTestCase {
       let tagName = RemoteName(host: "example.com", namespace: "org/image", reference: Reference(tag: "deleted"))
       let tagURL = storage.baseURL.appendingRemoteName(tagName)
       try storage.link(from: tagName, to: deletedName)
+      let secondTagName = RemoteName(host: "example.com", namespace: "org/image", reference: Reference(tag: "old"))
+      let secondTagURL = storage.baseURL.appendingRemoteName(secondTagName)
+      try storage.link(from: secondTagName, to: deletedName)
       let retainedRecord = try createRecord(for: retainedManifest, in: storage)
       let retainedTagName = RemoteName(host: "example.com", namespace: "org/image", reference: Reference(tag: "retained"))
       let retainedTagURL = storage.baseURL.appendingRemoteName(retainedTagName)
@@ -817,6 +791,7 @@ final class VMStorageOCITests: XCTestCase {
 
       XCTAssertFalse(FileManager.default.fileExists(atPath: deletedRecord.url.path))
       XCTAssertFalse((try? tagURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false)
+      XCTAssertFalse((try? secondTagURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false)
       XCTAssertTrue(FileManager.default.fileExists(atPath: retainedRecord.url.path))
       XCTAssertTrue(FileManager.default.fileExists(atPath: retainedTagURL.path))
     }

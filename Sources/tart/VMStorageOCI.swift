@@ -290,13 +290,24 @@ class VMStorageOCI: PrunableStorage {
   /// Find tag links to a cached image before its directory is removed.
   fileprivate func tagSymlinks(pointingTo targetURL: URL) throws -> [URL] {
     let targetPath = resolvedPath(targetURL)
-    return try list().compactMap { (_, vmDir, isSymlink) in
-      guard isSymlink, resolvedPath(vmDir.baseURL) == targetPath else {
-        return nil
+    guard let enumerator = FileManager.default.enumerator(
+      at: baseURL,
+      includingPropertiesForKeys: [.isSymbolicLinkKey]
+    ) else {
+      return []
+    }
+
+    var result = [URL]()
+    for case let foundURL as URL in enumerator {
+      let values = try foundURL.resourceValues(forKeys: [.isSymbolicLinkKey])
+      guard values.isSymbolicLink == true, resolvedPath(foundURL) == targetPath else {
+        continue
       }
 
-      return vmDir.baseURL
+      result.append(foundURL)
     }
+
+    return result
   }
 
   func list() throws -> [(String, VMDirectory, Bool)] {
@@ -307,27 +318,25 @@ class VMStorageOCI: PrunableStorage {
       return []
     }
 
-    for case let relativeURL as URL in enumerator {
-      let foundPath = URL(fileURLWithPath: relativeURL.relativePath, relativeTo: baseURL).standardizedFileURL.path
-      // standardizing an existing directory infers its directory hint again.
-      let foundURL = URL(fileURLWithPath: foundPath, isDirectory: false)
+    for case let foundURL as URL in enumerator {
       let vmDir = VMDirectory(baseURL: foundURL)
 
       if !vmDir.isCachedImage {
         continue
       }
 
-      let relativePath = relativeURL.relativePath
-      guard let separatorIndex = relativePath.lastIndex(of: "/") else {
-        continue
-      }
-      let parts = [
-        String(relativePath[..<separatorIndex]),
-        String(relativePath[relativePath.index(after: separatorIndex)...])
-      ]
+      let parts = [foundURL.deletingLastPathComponent().relativePath, foundURL.lastPathComponent]
+      var name: String
+
       let isSymlink = try foundURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink!
-      let separator = isSymlink ? ":" : "@"
-      let name = percentDecode(parts.joined(separator: separator))
+      if isSymlink {
+        name = parts.joined(separator: ":")
+      } else {
+        name = parts.joined(separator: "@")
+      }
+
+      // Remove the percent-encoding, if any
+      name = percentDecode(name)
       result.append((name, vmDir, isSymlink))
     }
 
@@ -847,7 +856,9 @@ private struct CachedImagePrunable: Prunable {
     try contentStore.withPruneLock {
       let tagSymlinks = try storage.tagSymlinks(pointingTo: vmDir.url)
       try vmDir.deleteHoldingPruneLock()
-      try tagSymlinks.forEach { try FileManager.default.removeItem(at: $0) }
+      for tagSymlink in tagSymlinks {
+        try FileManager.default.removeItem(at: tagSymlink)
+      }
     }
   }
 
