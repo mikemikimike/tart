@@ -707,6 +707,91 @@ final class VMStorageOCITests: XCTestCase {
     }
   }
 
+  func testSpaceBudgetCollectsReleasedContentBeforeRecomputing() throws {
+    try withTemporaryTartHome {
+      let contentStore = try ContentStore()
+      let deletedBase = try installContent(Data(repeating: 0x41, count: 32 * 1024), into: contentStore)
+      let deletedOverlay = try installContent(Data("deleted-overlay".utf8), into: contentStore)
+      let retainedBase = try installContent(Data(repeating: 0x42, count: 64 * 1024), into: contentStore)
+      let retainedOverlay = try installContent(Data("retained-overlay".utf8), into: contentStore)
+      let storage = try VMStorageOCI()
+      let deleted = try createRecord(for: stackedManifest(
+        baseContentDigest: deletedBase.digest,
+        overlayContentDigest: deletedOverlay.digest,
+        baseUncompressedSize: UInt64(try deletedBase.url.sizeBytes()),
+        overlayUncompressedSize: UInt64(try deletedOverlay.url.sizeBytes())
+      ), in: storage)
+      let retained = try createRecord(for: stackedManifest(
+        baseContentDigest: retainedBase.digest,
+        overlayContentDigest: retainedOverlay.digest,
+        baseUncompressedSize: UInt64(try retainedBase.url.sizeBytes()),
+        overlayUncompressedSize: UInt64(try retainedOverlay.url.sizeBytes())
+      ), in: storage)
+      try deleted.url.updateAccessDate(Date(timeIntervalSince1970: 1))
+      try retained.url.updateAccessDate(Date(timeIntervalSince1970: 2))
+      try deletedBase.url.updateAccessDate(Date(timeIntervalSince1970: 3))
+      try deletedOverlay.url.updateAccessDate(Date(timeIntervalSince1970: 3))
+      let retainedCandidate = try XCTUnwrap(storage.prunables().first {
+        $0.url.lastPathComponent == retained.url.lastPathComponent
+      })
+
+      // Released content is newer than the retained image and would otherwise
+      // consume its budget on the next pass.
+      try Prune.pruneSpaceBudget(
+        prunableStorages: [storage],
+        spaceBudgetBytes: UInt64(try retainedCandidate.allocatedSizeBytes())
+      )
+
+      XCTAssertFalse(FileManager.default.fileExists(atPath: deleted.url.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: deletedBase.url.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: deletedOverlay.url.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: retained.url.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: retainedBase.url.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: retainedOverlay.url.path))
+    }
+  }
+
+  func testAutomaticReclaimCollectsReleasedContentBeforeRecomputing() throws {
+    try withTemporaryTartHome {
+      let contentStore = try ContentStore()
+      let deletedBase = try installContent(Data(repeating: 0x41, count: 32 * 1024), into: contentStore)
+      let deletedOverlay = try installContent(Data("deleted-overlay".utf8), into: contentStore)
+      let retainedBase = try installContent(Data(repeating: 0x42, count: 64 * 1024), into: contentStore)
+      let retainedOverlay = try installContent(Data("retained-overlay".utf8), into: contentStore)
+      let storage = try VMStorageOCI()
+      let deleted = try createRecord(for: stackedManifest(
+        baseContentDigest: deletedBase.digest,
+        overlayContentDigest: deletedOverlay.digest,
+        baseUncompressedSize: UInt64(try deletedBase.url.sizeBytes()),
+        overlayUncompressedSize: UInt64(try deletedOverlay.url.sizeBytes())
+      ), in: storage)
+      let retained = try createRecord(for: stackedManifest(
+        baseContentDigest: retainedBase.digest,
+        overlayContentDigest: retainedOverlay.digest,
+        baseUncompressedSize: UInt64(try retainedBase.url.sizeBytes()),
+        overlayUncompressedSize: UInt64(try retainedOverlay.url.sizeBytes())
+      ), in: storage)
+      try deleted.url.updateAccessDate(Date(timeIntervalSince1970: 1))
+      try retained.url.updateAccessDate(Date(timeIntervalSince1970: 2))
+      try deletedBase.url.updateAccessDate(Date(timeIntervalSince1970: 3))
+      try deletedOverlay.url.updateAccessDate(Date(timeIntervalSince1970: 3))
+      let deletedCandidate = try XCTUnwrap(storage.prunables().first {
+        $0.url.lastPathComponent == deleted.url.lastPathComponent
+      })
+
+      // Deleting the oldest record and its content already satisfies reclaim;
+      // counting its released content again would delete the next image too.
+      try Prune.reclaimIfPossible(UInt64(try deletedCandidate.allocatedSizeBytes()))
+
+      XCTAssertFalse(FileManager.default.fileExists(atPath: deleted.url.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: deletedBase.url.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: deletedOverlay.url.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: retained.url.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: retainedBase.url.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: retainedOverlay.url.path))
+    }
+  }
+
   func testAutomaticReclaimRecomputesSharedContentAfterOwnerDeletion() throws {
     try withTemporaryTartHome {
       let contentStore = try ContentStore()
@@ -947,7 +1032,7 @@ final class VMStorageOCITests: XCTestCase {
       XCTAssertEqual(deletionFinished.wait(timeout: .now() + 1), .success)
       XCTAssertFalse(FileManager.default.fileExists(atPath: record.url.path))
       XCTAssertFalse((try? storage.baseURL.appendingRemoteName(tagName)
-        .resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false)
+          .resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false)
     }
   }
 

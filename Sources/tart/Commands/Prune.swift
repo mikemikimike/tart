@@ -95,7 +95,6 @@ struct Prune: AsyncParsableCommand {
 
   static func pruneSpaceBudget(prunableStorages: [PrunableStorage], spaceBudgetBytes: UInt64) throws {
     let ociStorage = firstOCIStorage(in: prunableStorages)
-    var didPruneCachedImage = false
 
     while true {
       let prunables: [Prunable] = try prunableStorages
@@ -123,13 +122,10 @@ struct Prune: AsyncParsableCommand {
 
       // Deleting one cached stacked image can change which remaining image
       // owns shared immutable content. Rebuild before choosing another.
-      if let ociStorage, isCachedImage(prunableToDelete, in: ociStorage) {
-        didPruneCachedImage = true
-      }
+      let didPruneCachedImage = ociStorage.map { isCachedImage(prunableToDelete, in: $0) } ?? false
       try prunableToDelete.delete()
+      try collectOCIContentIfNeeded(using: ociStorage, afterDeletingCachedImage: didPruneCachedImage)
     }
-
-    try collectOCIContentIfNeeded(using: ociStorage, afterDeletingCachedImage: didPruneCachedImage)
   }
 
   private static func firstOCIStorage(in prunableStorages: [PrunableStorage]) -> VMStorageOCI? {
@@ -217,7 +213,6 @@ struct Prune: AsyncParsableCommand {
     let initiatorPath = initiator.map {
       $0.url.resolvingSymlinksInPath().standardizedFileURL.path
     }
-    var didPruneCachedImage = false
 
     while currentCacheUsedBytes > targetCacheUsedBytes {
       // Deleting one cached stacked image can transfer ownership of shared
@@ -235,15 +230,9 @@ struct Prune: AsyncParsableCommand {
       OpenTelemetry.instance.contextProvider.activeSpan?
         .addEvent(name: "Pruned \(allocatedSizeBytes) bytes for \(prunable.url.path)")
 
-      if isCachedImage(prunable, in: ociStorage) {
-        didPruneCachedImage = true
-      }
+      let didPruneCachedImage = isCachedImage(prunable, in: ociStorage)
       try prunable.delete()
-      currentCacheUsedBytes = try prunables().map { try $0.allocatedSizeBytes() }.reduce(0, +)
-    }
-
-    try collectOCIContentIfNeeded(using: ociStorage, afterDeletingCachedImage: didPruneCachedImage)
-    if didPruneCachedImage {
+      try collectOCIContentIfNeeded(using: ociStorage, afterDeletingCachedImage: didPruneCachedImage)
       currentCacheUsedBytes = try prunables().map { try $0.allocatedSizeBytes() }.reduce(0, +)
     }
 
