@@ -287,12 +287,14 @@ class VMStorageOCI: PrunableStorage {
     url.standardizedFileURL.resolvingSymlinksInPath().standardizedFileURL.path
   }
 
-  /// Find tag links to a cached image before its directory is removed.
+  /// Tags and digests share a namespace directory. Look only at its direct
+  /// entries, without traversing other namespaces or cached image contents.
   fileprivate func tagSymlinks(pointingTo targetURL: URL) throws -> [URL] {
     let targetPath = resolvedPath(targetURL)
     guard let enumerator = FileManager.default.enumerator(
-      at: baseURL,
-      includingPropertiesForKeys: [.isSymbolicLinkKey]
+      at: targetURL.deletingLastPathComponent(),
+      includingPropertiesForKeys: [.isSymbolicLinkKey],
+      options: [.skipsSubdirectoryDescendants]
     ) else {
       return []
     }
