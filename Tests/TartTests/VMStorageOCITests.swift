@@ -514,6 +514,14 @@ final class VMStorageOCITests: XCTestCase {
     }
   }
 
+  func testAgePruningCollectsReleasedContentAfterLaterDeletionFails() throws {
+    try assertAgePruningCollectsContentAfterFailure(.deletion)
+  }
+
+  func testAgePruningCollectsReleasedContentAfterLaterAccessDateFails() throws {
+    try assertAgePruningCollectsContentAfterFailure(.accessDate)
+  }
+
   func testMalformedStackedOCIRecordDoesNotBlockPruning() throws {
     try withTemporaryTartHome {
       let contentStore = try ContentStore()
@@ -1169,6 +1177,59 @@ final class VMStorageOCITests: XCTestCase {
     try diskData.write(to: vmDir.diskURL)
 
     return vmDir
+  }
+
+  private enum AgePruneFailure: Error, Equatable {
+    case deletion
+    case accessDate
+  }
+
+  private struct FailingAgePrunable: Prunable, PrunableStorage {
+    let url: URL
+    let failure: AgePruneFailure
+
+    func prunables() throws -> [Prunable] { [self] }
+    func delete() throws { throw failure }
+    func accessDate() throws -> Date {
+      if failure == .accessDate {
+        throw failure
+      }
+      return .distantPast
+    }
+    func sizeBytes() throws -> Int { 0 }
+    func allocatedSizeBytes() throws -> Int { 0 }
+  }
+
+  private func assertAgePruningCollectsContentAfterFailure(_ failure: AgePruneFailure) throws {
+    try withTemporaryTartHome {
+      let contentStore = try ContentStore()
+      let baseContent = try installContent(Data("released-base".utf8), into: contentStore)
+      let overlayContent = try installContent(Data("released-overlay".utf8), into: contentStore)
+      let storage = try VMStorageOCI()
+      let record = try createRecord(for: stackedManifest(
+        baseContentDigest: baseContent.digest,
+        overlayContentDigest: overlayContent.digest,
+        baseUncompressedSize: UInt64(try baseContent.url.sizeBytes()),
+        overlayUncompressedSize: UInt64(try overlayContent.url.sizeBytes())
+      ), in: storage)
+      let cutoff = Date(timeIntervalSince1970: 2)
+      try record.url.updateAccessDate(Date(timeIntervalSince1970: 1))
+      try baseContent.url.updateAccessDate(Date(timeIntervalSince1970: 3))
+      try overlayContent.url.updateAccessDate(Date(timeIntervalSince1970: 3))
+      let failing = FailingAgePrunable(url: try temporaryDirectory(), failure: failure)
+
+      XCTAssertThrowsError(try Prune.pruneOlderThan(
+        prunableStorages: [storage, failing], olderThanDate: cutoff
+      )) { error in
+        XCTAssertEqual(error as? AgePruneFailure, failure)
+      }
+
+      XCTAssertFalse(FileManager.default.fileExists(atPath: record.url.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: baseContent.url.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: overlayContent.url.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: failing.url.path))
+      XCTAssertNoThrow(try Prune.pruneOlderThan(prunableStorages: [storage], olderThanDate: cutoff))
+    }
   }
 
   private func createRecord(for manifest: OCIManifest, in storage: VMStorageOCI) throws -> VMDirectory {

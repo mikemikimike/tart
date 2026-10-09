@@ -79,15 +79,21 @@ struct Prune: AsyncParsableCommand {
     let ociStorage = firstOCIStorage(in: prunableStorages)
     var didPruneCachedImage = false
 
-    for prunable in prunables {
-      guard try prunable.accessDate() <= olderThanDate else {
-        continue
-      }
+    do {
+      for prunable in prunables {
+        guard try prunable.accessDate() <= olderThanDate else {
+          continue
+        }
 
-      if let ociStorage, isCachedImage(prunable, in: ociStorage) {
-        didPruneCachedImage = true
+        let didDeleteCachedImage = ociStorage.map { isCachedImage(prunable, in: $0) } ?? false
+        try prunable.delete()
+        didPruneCachedImage = didPruneCachedImage || didDeleteCachedImage
       }
-      try prunable.delete()
+    } catch {
+      // Reclaim content released before the failure, preserving the original
+      // pruning error even if this cleanup also fails.
+      try? collectOCIContentIfNeeded(using: ociStorage, afterDeletingCachedImage: didPruneCachedImage)
+      throw error
     }
 
     try collectOCIContentIfNeeded(using: ociStorage, afterDeletingCachedImage: didPruneCachedImage)
